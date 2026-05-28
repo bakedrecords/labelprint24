@@ -335,16 +335,8 @@
               <label>製造者</label>
               <div class="inline">
                 <span id="makerDisplay" class="hint"></span>
-                <button class="btn btn-sm" onclick="openMakerEdit()">変更</button>
               </div>
-              <div id="makerEdit" style="display:none; margin-top:8px;">
-                <input type="text" id="makerName" placeholder="名称" style="width:100%; margin-bottom:6px;">
-                <input type="text" id="makerAddr" placeholder="住所" style="width:100%;">
-                <div class="inline" style="margin-top:6px;">
-                  <button class="btn btn-sm btn-primary" onclick="applyMakerEdit()">適用</button>
-                  <button class="btn btn-sm" onclick="resetMakerEdit()">登録情報に戻す</button>
-                </div>
-              </div>
+              <p class="hint" style="margin-top:4px;">変更は「設定」画面で行えます（全シール共通）。</p>
             </div>
             <div class="field">
               <label>上から何枚スキップするか（使いかけの用紙用）</label>
@@ -507,7 +499,6 @@ let layout = {
   skip: 0,
   expiry: { type: 'today', date: '', days: 3 },
   storageMethodId: null,
-  makerOverride: null,  // {name, address} or null
   offsetX: 0,           // 印刷位置の微調整(mm)：＋で右、−で左
   offsetY: 0,           // 印刷位置の微調整(mm)：＋で下、−で上
 };
@@ -566,6 +557,7 @@ function load() {
   if (!layout.storageMethodId && storageMethods.length) {
     layout.storageMethodId = storageMethods[0].id;
   }
+  delete layout.makerOverride; // 旧バージョンの不要データを掃除（製造者は設定に一元化）
 }
 function mkProduct(name, ingredients, tags, amount) {
   return { id: uid('p'), name, ingredients, amount: amount || '', tags: tags || [], pinned: false, usageCount: 0, createdAt: nowISO(), updatedAt: nowISO() };
@@ -913,39 +905,15 @@ function onStorageChange() {
 }
 
 // --- 製造者 ---
-function currentMaker() { return layout.makerOverride || manufacturer; }
+function currentMaker() { return manufacturer; }
 function renderMakerDisplay() {
-  const m = currentMaker();
-  const tag = layout.makerOverride ? '（変更中）' : '';
+  const m = manufacturer;
   const el = document.getElementById('makerDisplay');
   if (!m.name && !m.address) {
     el.innerHTML = '<span style="color:var(--danger)">未設定 — 「設定」画面でお店の名称・住所を登録してください</span>';
   } else {
-    el.textContent = `${m.name} ／ ${m.address} ${tag}`;
+    el.textContent = `${m.name} ／ ${m.address}`;
   }
-}
-function openMakerEdit() {
-  const m = currentMaker();
-  document.getElementById('makerName').value = m.name;
-  document.getElementById('makerAddr').value = m.address;
-  document.getElementById('makerEdit').style.display = '';
-}
-function applyMakerEdit() {
-  layout.makerOverride = {
-    name: document.getElementById('makerName').value.trim(),
-    address: document.getElementById('makerAddr').value.trim(),
-  };
-  document.getElementById('makerEdit').style.display = 'none';
-  renderMakerDisplay();
-  save();
-  buildPages();
-}
-function resetMakerEdit() {
-  layout.makerOverride = null;
-  document.getElementById('makerEdit').style.display = 'none';
-  renderMakerDisplay();
-  save();
-  buildPages();
 }
 
 // ===== ページ生成（プレビュー兼印刷）=====
