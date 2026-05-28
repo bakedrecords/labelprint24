@@ -1085,21 +1085,16 @@ function importData(ev) {
   reader.onload = () => {
     try {
       const data = JSON.parse(reader.result);
-      if (!data.products) { alert('このファイルには商品データが見つかりません。'); return; }
-      const mode = confirm('「OK」＝既存データに追加（マージ）\n「キャンセル」＝すべて上書き\n\nどちらにしますか？') ? 'merge' : 'overwrite';
-      if (mode === 'overwrite') {
-        products = data.products || [];
-        storageMethods = data.storageMethods || storageMethods;
-        manufacturer = data.manufacturer || manufacturer;
-      } else {
-        const existingIds = new Set(products.map(p => p.id));
-        (data.products || []).forEach(p => {
-          if (existingIds.has(p.id)) p.id = uid('p');
-          products.push(p);
-        });
-        (data.storageMethods || []).forEach(s => {
-          if (!storageMethods.some(x => x.label === s.label)) storageMethods.push({ id: uid('s'), label: s.label });
-        });
+      if (!data.products) { alert('このファイルには商品データが見つかりません。'); ev.target.value = ''; return; }
+      if (!confirm('現在のデータをすべて、選んだファイルの内容で上書きします。\n（今の商品・保存方法・製造者は消えます）\n\nよろしいですか？')) {
+        ev.target.value = '';
+        return; // ＝ インポートを中止（何もしない）。誤ってファイルを選んでもデータは消えない
+      }
+      products = data.products || [];
+      storageMethods = data.storageMethods || storageMethods;
+      manufacturer = data.manufacturer || manufacturer;
+      if (layout.storageMethodId && !storageMethods.some(s => s.id === layout.storageMethodId)) {
+        layout.storageMethodId = storageMethods[0] ? storageMethods[0].id : null;
       }
       save();
       renderProducts(); renderSettings();
