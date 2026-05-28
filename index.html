@@ -560,7 +560,7 @@ function load() {
   if (!localStorage.getItem(LS.products)) {
     // 初回のみサンプル商品を投入
     products = [
-      mkProduct('（例）あんぱん', '小麦粉、砂糖、塩、パン酵母、卵、バター、つぶあん', ['例']),
+      mkProduct('（例）あんぱん', '小麦粉、砂糖、塩、パン酵母、卵、バター、つぶあん', []),
     ];
   }
   if (!layout.storageMethodId && storageMethods.length) {
@@ -715,6 +715,7 @@ function renderEditingTags() {
   });
 }
 function onTagKeydown(e) {
+  if (e.isComposing || e.keyCode === 229) return; // 日本語入力（IME）の変換確定Enterは無視
   if (e.key === 'Enter' || e.key === ',') {
     e.preventDefault();
     const v = e.target.value.trim().replace(/,$/, '');
@@ -1152,11 +1153,7 @@ save();
 takeSortSnapshot();
 renderProducts();
 renderCart();
-
-// モーダル外側クリックで閉じる
-document.getElementById('productModal').addEventListener('click', e => {
-  if (e.target.id === 'productModal') closeProductModal();
-});
+// 商品編集モーダルは「保存」「キャンセル」でのみ閉じる（画面外クリックでは閉じない＝誤操作防止）
 </script>
 </body>
 </html>
