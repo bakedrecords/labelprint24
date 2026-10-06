@@ -239,6 +239,10 @@
   .seal-table .r-ing { height: 100%; }            /* 原材料名のマスが余白を吸収して伸びる */
   .seal-table .r-ing td { vertical-align: top; }  /* 内容は上寄せ */
   .seal-table .r-ing th { vertical-align: top; }    /* 「原材料名」ラベルも上寄せ */
+  /* 自動縮小しても枠に入りきらないシール：画面プレビューだけ赤い点線で知らせる（印刷には出ない） */
+  #screen-print-area .seal-overflow { outline: 0.6mm dashed #d00; outline-offset: -0.6mm; }
+  .fit-warning { display: none; background: #fdecec; border: 1px solid #e3a3a3; color: #8a1c1c; border-radius: 8px; padding: 8px 12px; font-size: 13px; line-height: 1.6; margin-bottom: 10px; }
+  .fit-warning.show { display: block; }
 
   /* 設定画面 */
   .sm-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; }
@@ -316,7 +320,12 @@
           <div class="panel">
             <h2>印刷の共通設定</h2>
             <div class="field">
-              <label>賞味期限</label>
+              <label>期限の表示</label>
+              <div class="radio-row" id="expiryLabelRadios" style="margin-bottom:6px;">
+                <label><input type="radio" name="expiryLabel" value="賞味期限" onchange="onExpiryLabelChange()"> 賞味期限</label>
+                <label><input type="radio" name="expiryLabel" value="消費期限" onchange="onExpiryLabelChange()"> 消費期限</label>
+              </div>
+              <p class="hint" style="margin:0 0 8px;">お弁当・惣菜など日持ちしない食品は「消費期限」、それ以外は「賞味期限」が一般的です。</p>
               <div class="radio-row" id="expiryRadios">
                 <label><input type="radio" name="expiry" value="today" onchange="onExpiryChange()"> 当日中</label>
                 <label><input type="radio" name="expiry" value="date" onchange="onExpiryChange()"> 日付指定</label>
@@ -366,6 +375,7 @@
         </div>
         <div>
           <div class="panel">
+            <div class="fit-warning" id="fitWarning"></div>
             <div class="preview-info">
               <span id="usageSummary"></span>
               <div class="pager">
@@ -491,6 +501,8 @@ const PX_PER_MM = 96 / 25.4;
 const TEXT_ML = 13.76;                // シール枠の位置を文字座標から逆算するための距離(mm)
 const FRAME_TOP0 = 13.04;             // 1行目のシール枠の上端(mm)
 const SEAL_W = 66, SEAL_H = 33.9;     // 一片の外形(mm)
+const SEAL_FONT_PT = 6.2;             // シール内の基本の文字サイズ(pt)
+const SEAL_FONT_MIN_PT = 5.5;         // 自動縮小の下限(pt)。食品表示基準：表示可能面積150cm²以下は5.5pt以上
 
 const LS = {
   products: 'bakeryLabels_products',
@@ -506,7 +518,7 @@ let manufacturer = { name: '', address: '' };
 let layout = {
   items: [],            // [{productId, count}]
   skip: 0,
-  expiry: { type: 'today', date: '', days: 3 },
+  expiry: { type: 'today', date: '', days: 3, label: '賞味期限' }, // label＝シールの見出し（賞味期限／消費期限）
   storageMethodId: null,
   offsetX: 0,           // 印刷位置の微調整(mm)：＋で右、−で左
   offsetY: 0,           // 印刷位置の微調整(mm)：＋で下、−で上
@@ -567,6 +579,8 @@ function load() {
     layout.storageMethodId = storageMethods[0].id;
   }
   delete layout.makerOverride; // 旧バージョンの不要データを掃除（製造者は設定に一元化）
+  if (!layout.expiry) layout.expiry = { type: 'today', date: '', days: 3 };
+  if (!layout.expiry.label) layout.expiry.label = '賞味期限'; // 旧データ（見出しなし）は従来どおり「賞味期限」
 }
 function mkProduct(name, ingredients, tags, amount) {
   return { id: uid('p'), name, ingredients, amount: amount || '', tags: tags || [], pinned: false, usageCount: 0, createdAt: nowISO(), updatedAt: nowISO() };
@@ -893,6 +907,20 @@ function syncExpiryControls() {
   if (layout.expiry.date) document.getElementById('expiryDate').value = layout.expiry.date;
   document.getElementById('expiryDays').value = layout.expiry.days;
   document.getElementById('expiryPreview').textContent = expiryText();
+  // 見出し（賞味期限／消費期限）のラジオも同期
+  const lab = layout.expiry.label || '賞味期限';
+  document.querySelectorAll('#expiryLabelRadios label').forEach(l => {
+    const inp = l.querySelector('input');
+    inp.checked = (inp.value === lab);
+    l.classList.toggle('sel', inp.value === lab);
+  });
+}
+function onExpiryLabelChange() {
+  const r = document.querySelector('input[name="expiryLabel"]:checked');
+  layout.expiry.label = r ? r.value : '賞味期限';
+  syncExpiryControls();
+  save();
+  buildPages();
 }
 function expiryText() {
   const e = layout.expiry;
@@ -937,20 +965,67 @@ function buildCells() {
   });
   return cells;
 }
-function sealInner(p) {
+function sealInner(p, fontPt) {
   const storage = storageMethods.find(s => s.id === layout.storageMethodId);
   const m = currentMaker();
-  return `<table class="seal-table">
+  const pt = fontPt || SEAL_FONT_PT;
+  const expiryLabel = (layout.expiry && layout.expiry.label) || '賞味期限';
+  return `<table class="seal-table" style="font-size:${pt}pt">
     <tr class="r-name"><th>名称</th><td>${esc(p.name)}</td></tr>
     ${p.amount ? `<tr><th>内容量</th><td>${esc(p.amount)}</td></tr>` : ''}
     <tr class="r-ing"><th>原材料名</th><td>${esc(p.ingredients)}</td></tr>
-    <tr><th>賞味期限</th><td>${esc(expiryText())}</td></tr>
+    <tr><th>${esc(expiryLabel)}</th><td>${esc(expiryText())}</td></tr>
     <tr><th>保存方法</th><td>${esc(storage ? storage.label : '')}</td></tr>
     <tr class="r-maker"><th>製造者</th><td>${esc(m.name)}<br>${esc(m.address)}</td></tr>
   </table>`;
 }
+
+// ===== 自動縮小：入りきらないシールだけ文字を小さくして枠に収める =====
+// 測定用の箱（画面外・非表示）。#app の中に置くので印刷時は #app ごと非表示になる。
+let fitMeasureBox = null;
+function getFitMeasureBox() {
+  if (fitMeasureBox) return fitMeasureBox;
+  const b = document.createElement('div');
+  b.className = 'seal-box';
+  b.style.cssText = `position:fixed; left:-10000px; top:0; width:${SEAL_W}mm; height:${SEAL_H}mm; visibility:hidden; pointer-events:none;`;
+  (document.getElementById('app') || document.body).appendChild(b);
+  fitMeasureBox = b;
+  return b;
+}
+// 商品1件分のシールが枠に収まる文字サイズを探す（6.2pt → 0.1pt刻みで下げる → 下限5.5pt）
+// 戻り値 { pt: 使う文字サイズ, overflow: 下限まで下げても入りきらないか }
+function fitSeal(p) {
+  const box = getFitMeasureBox();
+  let pt = SEAL_FONT_PT;
+  for (;;) {
+    box.innerHTML = sealInner(p, pt);
+    const t = box.querySelector('table');
+    if (t.offsetHeight <= box.clientHeight + 0.5) return { pt, overflow: false };
+    if (pt <= SEAL_FONT_MIN_PT + 1e-9) return { pt, overflow: true };
+    pt = Math.max(SEAL_FONT_MIN_PT, +(pt - 0.1).toFixed(1));
+  }
+}
+let lastOverflowNames = []; // 直近の buildPages で入りきらなかった商品名（印刷前の確認に使う）
+function renderFitWarning(names) {
+  lastOverflowNames = names;
+  const el = document.getElementById('fitWarning');
+  if (!el) return;
+  if (!names.length) { el.classList.remove('show'); el.innerHTML = ''; return; }
+  el.innerHTML = `⚠️ <b>枠に入りきらない商品があります：</b>${names.map(esc).join('、')}<br>` +
+    `文字を ${SEAL_FONT_MIN_PT}pt まで自動で小さくしましたが、それでも入りません（このまま印刷すると下の行が切れます）。<br>` +
+    `対処：原材料をまとめ表記で短くする／期限を「枠外に記載」にする／保存方法の文を短くする。`;
+  el.classList.add('show');
+}
 function buildPages() {
   const cells = buildCells();
+  // 商品ごとに「枠に収まる文字サイズ」を先に求める（同じ商品のシールは内容が同じなので1回でOK）
+  const fits = {};
+  const overflowNames = [];
+  cells.forEach(p => {
+    if (!p || fits[p.id]) return;
+    fits[p.id] = fitSeal(p);
+    if (fits[p.id].overflow) overflowNames.push(p.name);
+  });
   const totalPages = Math.max(1, Math.ceil(cells.length / CELLS_PER_PAGE));
   if (previewPage >= totalPages) previewPage = totalPages - 1;
   if (previewPage < 0) previewPage = 0;
@@ -964,7 +1039,8 @@ function buildPages() {
       const col = i % 3, row = Math.floor(i / 3);
       const fx = COL_X[col] - TEXT_ML + (layout.offsetX || 0);     // 枠の左端＋全体オフセット
       const fy = FRAME_TOP0 + ROW_GAP * row + (layout.offsetY || 0); // 枠の上端＋全体オフセット
-      html += `<div class="seal-box" style="left:${fx}mm; top:${fy}mm; width:${SEAL_W}mm; height:${SEAL_H}mm;">${sealInner(p)}</div>`;
+      const f = fits[p.id];
+      html += `<div class="seal-box${f.overflow ? ' seal-overflow' : ''}" style="left:${fx}mm; top:${fy}mm; width:${SEAL_W}mm; height:${SEAL_H}mm;">${sealInner(p, f.pt)}</div>`;
     }
     html += '</div>';
   }
@@ -980,6 +1056,7 @@ function buildPages() {
   const used = cells.filter(Boolean).length;
   document.getElementById('usageSummary').textContent = `配置 ${used} 面（スキップ ${layout.skip} 面）`;
   document.getElementById('pageLabel').textContent = `${previewPage + 1} / ${totalPages}`;
+  renderFitWarning(overflowNames);
 }
 function scalePreview() {
   const wrap = document.querySelector('.preview-wrap');
@@ -1001,6 +1078,11 @@ function doPrint() {
   buildPages();
   const used = buildCells().filter(Boolean).length;
   if (!used) { alert('配置されたシールがありません。商品を追加してください。'); return; }
+  if (lastOverflowNames.length) {
+    const ok = confirm('⚠️ 枠に入りきらない商品があります：\n' + lastOverflowNames.join('、') +
+      '\n\nこのまま印刷すると、はみ出した部分（下の行）は印刷されません。\n印刷を続けますか？');
+    if (!ok) return;
+  }
   window.print();
 }
 
